@@ -1,66 +1,83 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
-from pytube import YouTube
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler, CallbackContext
+from yt_dlp import YoutubeDL
 import os
 
 # توکن ربات تلگرام
 TOKEN = '7556835288:AAG7A_4me2tYgQheixdMOt5njYZO0DTWjuM'
 
-# دستور شروع ربات
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("سلام! لینک یوتیوب خود را ارسال کنید.")
+# تابع برای دریافت اطلاعات ویدیو
+def get_video_info(url):
+    ydl_opts = {}
+    with YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+        return info
 
-# دریافت لینک یوتیوب و نمایش کیفیت‌ها
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# تابع شروع
+def start(update: Update, context: CallbackContext) -> None:
+    update.message.reply_text('سلام! لطفا لینک یوتیوب را ارسال کنید.')
+
+# تابع دریافت لینک و نمایش کیفیت‌ها
+def handle_message(update: Update, context: CallbackContext) -> None:
     url = update.message.text
     try:
-        yt = YouTube(url)
-        streams = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc()
+        # دریافت اطلاعات ویدیو
+        info = get_video_info(url)
+        formats = info.get('formats', [])
         
         # ایجاد دکمه‌های کیفیت
-        buttons = []
-        for stream in streams:
-            buttons.append([InlineKeyboardButton(stream.resolution, callback_data=stream.itag)])
+        keyboard = []
+        for f in formats:
+            if f.get('resolution') and f.get('filesize'):
+                button = InlineKeyboardButton(
+                    f"{f['resolution']} ({round(f['filesize'] / (1024 * 1024), 2)} MB)",
+                    callback_data=f"{f['format_id']}|{url}"
+                )
+                keyboard.append([button])
         
-        reply_markup = InlineKeyboardMarkup(buttons)
-        await update.message.reply_text("لطفاً کیفیت مورد نظر را انتخاب کنید:", reply_markup=reply_markup)
-        
-        # ذخیره اطلاعات ویدیو در context
-        context.user_data['video_url'] = url
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        update.message.reply_text('لطفا کیفیت مورد نظر را انتخاب کنید:', reply_markup=reply_markup)
     except Exception as e:
-        await update.message.reply_text(f"خطا: {e}")
+        update.message.reply_text(f'خطا: {e}')
 
-# دانلود ویدیو با کیفیت انتخابی
-async def handle_quality(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# تابع دانلود ویدیو
+def handle_callback(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    itag = query.data
-    url = context.user_data.get('video_url')
+    query.answer()
+    
+    # دریافت اطلاعات از دکمه
+    format_id, url = query.data.split('|')
     
     try:
-        yt = YouTube(url)
-        stream = yt.streams.get_by_itag(itag)
-        file_path = stream.download(output_path='downloads')
+        # دانلود ویدیو با کیفیت انتخاب شده
+        ydl_opts = {
+            'format': format_id,
+            'outtmpl': '%(title)s.%(ext)s',
+        }
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            file_path = ydl.prepare_filename(info)
         
         # ارسال ویدیو به کاربر
         with open(file_path, 'rb') as video_file:
-            await query.message.reply_video(video=video_file, caption="ویدیو شما آماده است!")
+            query.message.reply_video(video_file)
         
-        # حذف فایل موقت
+        # حذف فایل پس از ارسال
         os.remove(file_path)
     except Exception as e:
-        await query.message.reply_text(f"خطا در دانلود ویدیو: {e}")
+        query.message.reply_text(f'خطا: {e}')
 
-def main():
-    # ایجاد برنامه تلگرام
-    application = Application.builder().token(TOKEN).build()
-    
-    # ثبت دستورات و handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    application.add_handler(CallbackQueryHandler(handle_quality))
-    
-    # اجرای ربات
-    application.run_polling()
+# تابع اصلی
+def main() -> None:
+    updater = Updater(TOKEN)
+    dispatcher = updater.dispatcher
 
-if __name__ == "__main__":
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+    dispatcher.add_handler(CallbackQueryHandler(handle_callback))
+
+    updater.start_polling()
+    updater.idle()
+
+if __name__ == '__main__':
     main()
