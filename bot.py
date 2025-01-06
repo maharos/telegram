@@ -3,12 +3,18 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 from yt_dlp import YoutubeDL
 import os
 
-# توکن ربات تلگرام
-TOKEN = '7556835288:AAG7A_4me2tYgQheixdMOt5njYZO0DTWjuM'
+# خواندن توکن از متغیر محیطی
+TOKEN = os.getenv('7556835288:AAG7A_4me2tYgQheixdMOt5njYZO0DTWjuM')
 
 # تابع برای دریافت اطلاعات ویدیو
 def get_video_info(url):
-    ydl_opts = {}
+    ydl_opts = {
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        },
+        'noplaylist': True,
+        'age_limit': 0,
+    }
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         return info
@@ -19,7 +25,13 @@ def start(update: Update, context: CallbackContext) -> None:
 
 # تابع دریافت لینک و نمایش کیفیت‌ها
 def handle_message(update: Update, context: CallbackContext) -> None:
-    url = update.message.text
+    url = update.message.text.strip()
+    
+    # بررسی لینک معتبر
+    if not url.startswith("https://www.youtube.com") and not url.startswith("https://youtu.be"):
+        update.message.reply_text('لطفاً یک لینک معتبر یوتیوب ارسال کنید.')
+        return
+    
     try:
         # دریافت اطلاعات ویدیو
         info = get_video_info(url)
@@ -35,10 +47,13 @@ def handle_message(update: Update, context: CallbackContext) -> None:
                 )
                 keyboard.append([button])
         
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        update.message.reply_text('لطفا کیفیت مورد نظر را انتخاب کنید:', reply_markup=reply_markup)
+        if keyboard:
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            update.message.reply_text('لطفا کیفیت مورد نظر را انتخاب کنید:', reply_markup=reply_markup)
+        else:
+            update.message.reply_text('هیچ کیفیتی برای این ویدیو در دسترس نیست.')
     except Exception as e:
-        update.message.reply_text(f'خطا: {e}')
+        update.message.reply_text(f'خطا در پردازش لینک: {e}')
 
 # تابع دانلود ویدیو
 def handle_callback(update: Update, context: CallbackContext) -> None:
@@ -53,6 +68,9 @@ def handle_callback(update: Update, context: CallbackContext) -> None:
         ydl_opts = {
             'format': format_id,
             'outtmpl': '%(title)s.%(ext)s',
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            },
         }
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -65,7 +83,7 @@ def handle_callback(update: Update, context: CallbackContext) -> None:
         # حذف فایل پس از ارسال
         os.remove(file_path)
     except Exception as e:
-        query.message.reply_text(f'خطا: {e}')
+        query.message.reply_text(f'خطا در دانلود یا ارسال ویدیو: {e}')
 
 # تابع اصلی
 def main() -> None:
@@ -79,5 +97,5 @@ def main() -> None:
     updater.start_polling()
     updater.idle()
 
-if __name__ == '__main__':
+if name == 'main':
     main()
